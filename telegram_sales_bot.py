@@ -115,13 +115,13 @@ def send_log_message(text, reply_markup=None):
 def main_menu():
     keyboard = {
         "inline_keyboard": [
-            [{"text": "\U0001f949 1 Haftalik (1.000 TL / ~25 USDT)", "callback_data": "buy_pkg_1w"}],
-            [{"text": "\U0001f948 1 Aylik (3.000 TL / ~75 USDT)", "callback_data": "buy_pkg_1m"}],
-            [{"text": "\U0001f947 2 Aylik (5.000 TL / ~125 USDT)", "callback_data": "buy_pkg_2m"}],
-            [{"text": "\U0001f48e 3 Aylik (7.000 TL / ~175 USDT)", "callback_data": "buy_pkg_3m"}],
-            [{"text": "\U0001f451 6 Aylik (10.000 TL / ~250 USDT)", "callback_data": "buy_pkg_6m"}],
-            [{"text": "\U0001f3c6 1 Yillik (15.000 TL / ~375 USDT)", "callback_data": "buy_pkg_1y"}],
-            [{"text": "\U0001f680 Sinirsiz Lisans (25.000 TL / ~625 USDT)", "callback_data": "buy_pkg_unlim"}],
+            [{"text": "\U0001f949 1 Haftalik (1.000 TL / ~25 USDT)", "callback_data": "buy#pkg_1w"}],
+            [{"text": "\U0001f948 1 Aylik (3.000 TL / ~75 USDT)", "callback_data": "buy#pkg_1m"}],
+            [{"text": "\U0001f947 2 Aylik (5.000 TL / ~125 USDT)", "callback_data": "buy#pkg_2m"}],
+            [{"text": "\U0001f48e 3 Aylik (7.000 TL / ~175 USDT)", "callback_data": "buy#pkg_3m"}],
+            [{"text": "\U0001f451 6 Aylik (10.000 TL / ~250 USDT)", "callback_data": "buy#pkg_6m"}],
+            [{"text": "\U0001f3c6 1 Yillik (15.000 TL / ~375 USDT)", "callback_data": "buy#pkg_1y"}],
+            [{"text": "\U0001f680 Sinirsiz Lisans (25.000 TL / ~625 USDT)", "callback_data": "buy#pkg_unlim"}],
             [{"text": "\U0001f4de Canli Destek / Iletisim", "url": "https://t.me/TwinPackSatis"}]
         ]
     }
@@ -177,7 +177,6 @@ def blockchain_auto_checker():
                                 processed_tx_hashes.add(tx_hash)
                                 
                                 code = order["code"]
-                                # Manuel onay havuzundan da kaldir
                                 pending_approvals.pop(code, None)
                                 
                                 deliver_license_to_customer(
@@ -211,9 +210,9 @@ def admin_approval_listener():
                             cb = update["callback_query"]
                             cb_data = cb.get("data", "")
                             
-                            # MANUEL ONAY: approve_CHATID_PKGKEY_CODE
-                            if cb_data.startswith("approve_"):
-                                parts = cb_data.split("_", 3)
+                            # MANUEL ONAY FORMATI: approve#CHATID#PKGKEY#CODE
+                            if cb_data.startswith("approve#"):
+                                parts = cb_data.split("#")
                                 if len(parts) == 4:
                                     target_chat_id = parts[1]
                                     pkg_key = parts[2]
@@ -229,14 +228,14 @@ def admin_approval_listener():
                                             usdt_amount, order["username"], "MANUEL ADMIN ONAY"
                                         )
                                         
-                                        # Havuzlardan temizle
                                         del pending_approvals[code]
                                         pending_orders.pop(usdt_amount, None)
+                                        send_log_message(f"\u2705 <code>{code}</code> kodlu lisans basariyla onaylandi ve musterisine teslim edildi!")
                                     else:
                                         send_log_message(f"\u26a0\ufe0f <code>{code}</code> kodlu siparis zaten onaylandi veya bulunamadi.")
                                         
-                            elif cb_data.startswith("reject_"):
-                                parts = cb_data.split("_", 2)
+                            elif cb_data.startswith("reject#"):
+                                parts = cb_data.split("#")
                                 if len(parts) == 3:
                                     target_chat_id = parts[1]
                                     code = parts[2]
@@ -298,8 +297,8 @@ def process_updates():
                             cb_data = cb.get("data", "")
                             username = cb.get("from", {}).get("username", "Kullanici")
                             
-                            if cb_data.startswith("buy_"):
-                                pkg_key = cb_data.replace("buy_", "")
+                            if cb_data.startswith("buy#"):
+                                pkg_key = cb_data.replace("buy#", "")
                                 if pkg_key in PACKAGES:
                                     pkg = PACKAGES[pkg_key]
                                     price_tl = pkg["price_tl"]
@@ -337,16 +336,15 @@ def process_updates():
                                     
                                     confirm_kb = {
                                         "inline_keyboard": [
-                                            [{"text": "\u2705 ODEMEYI GONDERDIM (ONAYA GONDER)", "callback_data": f"paid_{pkg_key}_{code}"}],
+                                            [{"text": "\u2705 ODEMEYI GONDERDIM (ONAYA GONDER)", "callback_data": f"paid#{pkg_key}#{code}"}],
                                             [{"text": "\U0001f504 Odeme Bekleniyor (Otomatik Kontrol)", "callback_data": "waiting"}],
                                             [{"text": "\U0001f519 Ana Menuye Don", "callback_data": "back_to_menu"}]
                                         ]
                                     }
                                     send_sales_message(chat_id, pay_msg, confirm_kb)
                                     
-                            elif cb_data.startswith("paid_"):
-                                # Musteri "Odemeyi Gonderdim" dedi -> Admine tek tus onay gonder
-                                parts = cb_data.split("_", 2)
+                            elif cb_data.startswith("paid#"):
+                                parts = cb_data.split("#")
                                 if len(parts) == 3:
                                     pkg_key = parts[1]
                                     code = parts[2]
@@ -356,7 +354,6 @@ def process_updates():
                                     pkg = PACKAGES.get(pkg_key, {})
                                     usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
                                     
-                                    # ADMINE LOG BOTU UZERINDEN TEK TUS ONAY GONDER
                                     admin_msg = (
                                         f"\U0001f4b0 <b>YENI ODEME BILDIRIMI!</b>\n\n"
                                         f"\U0001f464 <b>Musteri:</b> @{username} (ID: <code>{chat_id}</code>)\n"
@@ -368,8 +365,8 @@ def process_updates():
                                     
                                     admin_kb = {
                                         "inline_keyboard": [
-                                            [{"text": f"\u2705 ONAYLA VE KODU TESLIM ET ({code})", "callback_data": f"approve_{chat_id}_{pkg_key}_{code}"}],
-                                            [{"text": f"\u274c REDDET ({code})", "callback_data": f"reject_{chat_id}_{code}"}]
+                                            [{"text": f"\u2705 ONAYLA VE KODU TESLIM ET ({code})", "callback_data": f"approve#{chat_id}#{pkg_key}#{code}"}],
+                                            [{"text": f"\u274c REDDET ({code})", "callback_data": f"reject#{chat_id}#{code}"}]
                                         ]
                                     }
                                     send_log_message(admin_msg, admin_kb)
