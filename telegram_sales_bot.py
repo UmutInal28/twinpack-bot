@@ -72,6 +72,23 @@ def save_license_to_firebase(code, duration_days):
         print(f"Firestore lisans kayit hatasi ({code}): {e}")
         return False
 
+def check_and_lock_paid_notification(code):
+    """Render ve Local PC ayni anda calissa bile Firebase ortak veritabani uzerinden %100 TEKIL BILDIRIM garantisi verir"""
+    if db is None:
+        return True
+    try:
+        lock_ref = db.collection("notified_paid_codes").document(code)
+        doc = lock_ref.get()
+        if doc.exists:
+            # Zaten baska bir sunucu/process bildirim gonderdi!
+            return False
+        # Kilit koy
+        lock_ref.set({"notifiedAt": firestore.SERVER_TIMESTAMP})
+        return True
+    except Exception as e:
+        print(f"Lock check error: {e}")
+        return True
+
 # ------------------------------------------------------------
 # HTTP PROXY & PAKETLER
 # ------------------------------------------------------------
@@ -102,7 +119,6 @@ PACKAGES = {
 pending_orders = {}
 pending_approvals = {}
 processed_tx_hashes = set()
-processed_paid_codes = set()
 
 # RENDER WEB SERVICE PORT BINDING
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -426,10 +442,9 @@ def process_updates():
                             elif cb_data.startswith("paid#") or cb_data.startswith("paid_"):
                                 pkg_key, code = extract_pkg_and_code(cb_data)
                                 
-                                # COFT BILDIRIM ENGELI (Tekrar eden bildirimleri engelle)
-                                if code in processed_paid_codes:
+                                # FIREBASE ORTAK VERITABANI ATOMIK KILIT (Render + Local PC ayni anda calissa bile TEK BİLDİRİM)
+                                if not check_and_lock_paid_notification(code):
                                     continue
-                                processed_paid_codes.add(code)
                                 
                                 pkg = PACKAGES.get(pkg_key, {})
                                 usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
