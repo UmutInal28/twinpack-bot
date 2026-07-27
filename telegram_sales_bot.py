@@ -119,6 +119,7 @@ PACKAGES = {
 pending_orders = {}
 pending_approvals = {}
 processed_tx_hashes = set()
+processed_cb_ids = set()
 
 # RENDER WEB SERVICE PORT BINDING
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -142,6 +143,27 @@ def generate_license_code():
     part2 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     part3 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"{part1}-{part2}-{part3}"
+
+def answer_sales_callback(callback_query_id, text=None):
+    """Telegram kurali: Butona basildiginda Telegram'a aninda ONAY (ACK) gonderir ki Telegram mesaji 5 kere tekrar tekrar yollamasin!"""
+    url = f"https://api.telegram.org/bot{SALES_BOT_TOKEN}/answerCallbackQuery"
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        session.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"answer_sales_callback error: {e}")
+
+def answer_log_callback(callback_query_id, text=None):
+    url = f"https://api.telegram.org/bot{LOG_BOT_TOKEN}/answerCallbackQuery"
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        session.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"answer_log_callback error: {e}")
 
 def send_sales_message(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{SALES_BOT_TOKEN}/sendMessage"
@@ -303,6 +325,13 @@ def admin_approval_listener():
                         
                         if "callback_query" in update:
                             cb = update["callback_query"]
+                            cb_id = cb.get("id")
+                            if cb_id:
+                                if cb_id in processed_cb_ids:
+                                    continue
+                                processed_cb_ids.add(cb_id)
+                                answer_log_callback(cb_id, "Islem alindi...")
+
                             cb_data = cb.get("data", "")
                             
                             if cb_data.startswith("approve#") or cb_data.startswith("approve_"):
@@ -388,6 +417,13 @@ def process_updates():
 
                         elif "callback_query" in update:
                             cb = update["callback_query"]
+                            cb_id = cb.get("id")
+                            if cb_id:
+                                if cb_id in processed_cb_ids:
+                                    continue
+                                processed_cb_ids.add(cb_id)
+                                answer_sales_callback(cb_id, "Isleminiz alindi...")
+
                             chat_id = str(cb["message"]["chat"]["id"])
                             cb_data = cb.get("data", "")
                             username = cb.get("from", {}).get("username", "Kullanici")
@@ -442,7 +478,7 @@ def process_updates():
                             elif cb_data.startswith("paid#") or cb_data.startswith("paid_"):
                                 pkg_key, code = extract_pkg_and_code(cb_data)
                                 
-                                # FIREBASE ORTAK VERITABANI ATOMIK KILIT (Render + Local PC ayni anda calissa bile TEK BİLDİRİM)
+                                # FIREBASE ORTAK VERITABANI ATOMIK KILIT (Render + Local PC ayni anda calissa bile TEK BILDİRIM)
                                 if not check_and_lock_paid_notification(code):
                                     continue
                                 
