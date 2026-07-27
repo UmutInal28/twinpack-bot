@@ -102,6 +102,7 @@ PACKAGES = {
 pending_orders = {}
 pending_approvals = {}
 processed_tx_hashes = set()
+processed_paid_codes = set()
 
 # RENDER WEB SERVICE PORT BINDING
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -256,18 +257,15 @@ def extract_pkg_and_code(cb_data):
     if not matched_pkg_key:
         matched_pkg_key = "pkg_1m"
         
-    # Kodu bul: pkg_key sonrasindaki kisim
     raw_after_pkg = cb_data
     if "#" + matched_pkg_key + "#" in cb_data:
         raw_after_pkg = cb_data.split("#" + matched_pkg_key + "#")[-1]
     elif "_" + matched_pkg_key + "_" in cb_data:
         raw_after_pkg = cb_data.split("_" + matched_pkg_key + "_")[-1]
     else:
-        # fallback split
         parts = cb_data.replace("#", "_").split("_")
         raw_after_pkg = parts[-1]
         
-    # Eger 1m_K5AG-XWCF-OVF5 gibi bir kalinti kaldiysa temizle
     for p_id in ["1w_", "1m_", "2m_", "3m_", "6m_", "1y_", "unlim_"]:
         if raw_after_pkg.startswith(p_id):
             raw_after_pkg = raw_after_pkg.replace(p_id, "")
@@ -294,7 +292,6 @@ def admin_approval_listener():
                             if cb_data.startswith("approve#") or cb_data.startswith("approve_"):
                                 pkg_key, code = extract_pkg_and_code(cb_data)
                                 
-                                # Target chat_id extraction
                                 target_chat_id = "1066847598"
                                 parts = cb_data.replace("#", "_").split("_")
                                 if len(parts) >= 2 and parts[1].isdigit():
@@ -428,6 +425,12 @@ def process_updates():
                                     
                             elif cb_data.startswith("paid#") or cb_data.startswith("paid_"):
                                 pkg_key, code = extract_pkg_and_code(cb_data)
+                                
+                                # COFT BILDIRIM ENGELI (Tekrar eden bildirimleri engelle)
+                                if code in processed_paid_codes:
+                                    continue
+                                processed_paid_codes.add(code)
+                                
                                 pkg = PACKAGES.get(pkg_key, {})
                                 usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
                                 price_tl = pkg.get("price_tl", 0)
