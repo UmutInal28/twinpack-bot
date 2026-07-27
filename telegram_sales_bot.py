@@ -6,6 +6,7 @@ import requests
 import random
 import string
 import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ============================================================
 # TWIN PACK TELEGRAM 2-BOT MIMARISI
@@ -55,6 +56,23 @@ pending_orders = {}
 # Bekleyen Manuel Onaylar: {code: order_info} (Admin tek tus onay icin)
 pending_approvals = {}
 processed_tx_hashes = set()
+
+# RENDER WEB SERVICE PORT BINDING (Render sunucusunun 7/24 kapanmamasi icin)
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK - Twin Pack Sales Bot is Running")
+
+def start_health_server():
+    try:
+        port = int(os.environ.get("PORT", 10000))
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        print(f"Health check server listening on port {port}...")
+        server.serve_forever()
+    except Exception as e:
+        print(f"Health server error: {e}")
 
 def generate_license_code():
     part1 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
@@ -239,6 +257,10 @@ def process_updates():
     offset = 0
     print("Twin Pack 100% Otomatik Satis Botu Aktif...")
     
+    # Render Web Service Port Binding
+    t_health = threading.Thread(target=start_health_server, daemon=True)
+    t_health.start()
+
     # Arka plan threadleri baslat
     t1 = threading.Thread(target=blockchain_auto_checker, daemon=True)
     t1.start()
