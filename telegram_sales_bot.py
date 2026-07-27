@@ -8,9 +8,11 @@ import string
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+import firebase_admin
+from firebase_admin import credentials, firestore
+
 # ============================================================
-# TWIN PACK TELEGRAM 2-BOT MIMARISI
-# OTOMATIK BLOCKCHAIN + MANUEL TEK TUS ONAY SISTEMI
+# TWIN PACK TELEGRAM 2-BOT MIMARISI + FIREBASE FIRESTORE ENTEGRASYONU
 # ============================================================
 
 # 1. SATIS BOTU (Public Musteri Magazasi)
@@ -27,6 +29,52 @@ USDT_TRC20_ADDRESS = "TENBpF97XR1KVdbso4sia9eVd1xwU11FZe"
 
 USDT_RATE = 40.0
 
+# ------------------------------------------------------------
+# FIREBASE FIRESTORE BAGLANTISI
+# ------------------------------------------------------------
+db = None
+try:
+    sa_path = os.path.join(os.path.dirname(__file__), "license-tools", "service-account.json")
+    if not os.path.exists(sa_path):
+        sa_path = os.path.join(os.path.dirname(__file__), "service-account.json")
+    
+    if os.path.exists(sa_path):
+        cred = credentials.Certificate(sa_path)
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        print("Firebase Firestore baglantisi basariyla kuruldu.")
+    else:
+        print("UYARI: service-account.json bulunamadi, varsayilan cert ile deneniyor...")
+        cred = credentials.ApplicationDefault()
+        firebase_admin.initialize_app(cred, {'projectId': 'umut-c37fd'})
+        db = firestore.client()
+except Exception as e:
+    print(f"Firebase baglanti hatasi: {e}")
+
+def save_license_to_firebase(code, duration_days):
+    """Lisans kodunu aninda Firebase Firestore sunucusuna kaydeder ki kullanici uygulamada aktif edebilsin"""
+    if db is None:
+        print(f"HATA: Firebase DB aktif degil, {code} kaydedilemedi!")
+        return False
+    try:
+        col_name = "licenses_" + code[:2]
+        doc_ref = db.collection(col_name).document(code)
+        doc_ref.set({
+            "code": code,
+            "used": False,
+            "durationDays": int(duration_days),
+            "words_avrupa": [],
+            "words_anadolu": []
+        })
+        print(f"SUCCESS: Lisans {code} ({duration_days} gun) Firestore '{col_name}' koleksiyonuna kaydedildi.")
+        return True
+    except Exception as e:
+        print(f"Firestore lisans kayit hatasi ({code}): {e}")
+        return False
+
+# ------------------------------------------------------------
+# HTTP PROXY & PAKETLER
+# ------------------------------------------------------------
 PROXIES = None
 if os.path.exists("/etc/pythonanywhere") or "PYTHONANYWHERE_DOMAIN" in os.environ:
     PROXIES = {
@@ -48,16 +96,14 @@ PACKAGES = {
     "pkg_3m": {"name": "3 Aylik Lisans", "price_tl": 7000, "days": 90},
     "pkg_6m": {"name": "6 Aylik Lisans", "price_tl": 10000, "days": 180},
     "pkg_1y": {"name": "1 Yillik Lisans", "price_tl": 15000, "days": 365},
-    "pkg_unlim": {"name": "Sinirsiz Lisans", "price_tl": 25000, "days": 36500}
+    "pkg_unlim": {"name": "Sinirsiz Lisans", "price_tl": 25000, "days": -1}
 }
 
-# Bekleyen Siparisler: {usdt_amount: order_info} (Blockchain icin)
 pending_orders = {}
-# Bekleyen Manuel Onaylar: {code: order_info} (Admin tek tus onay icin)
 pending_approvals = {}
 processed_tx_hashes = set()
 
-# RENDER WEB SERVICE PORT BINDING (Render sunucusunun 7/24 kapanmamasi icin)
+# RENDER WEB SERVICE PORT BINDING
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -127,8 +173,13 @@ def main_menu():
     }
     return keyboard
 
-def deliver_license_to_customer(target_chat_id, code, pkg_name, usdt_amount, username, source="OTOMATIK"):
-    """Musteriye lisans kodunu teslim et ve admine bildir"""
+def deliver_license_to_customer(target_chat_id, code, pkg_name, usdt_amount, username, duration_days=30, source="OTOMATIK"):
+    """Musteriye lisans kodunu teslim et, Firebase Firestore'a kaydet ve admine bildir"""
+    
+    # 1. KODU FIREBASE FIRESTORE SUNUCUSUNA YAZ (Uygulamada aninda aktif olsun)
+    save_license_to_firebase(code, duration_days)
+
+    # 2. Musteriye Lisans Kodunu gonder
     success_msg = (
         f"\U0001f389 <b>KRIPTO ODEMENIZ ONAYLANDI! LISANSINIZ AKTIF!</b>\n\n"
         f"\U0001f4e6 <b>Paket:</b> {pkg_name}\n"
@@ -177,11 +228,12 @@ def blockchain_auto_checker():
                                 processed_tx_hashes.add(tx_hash)
                                 
                                 code = order["code"]
+                                pkg_days = order.get("duration_days", 30)
                                 pending_approvals.pop(code, None)
                                 
                                 deliver_license_to_customer(
                                     order["chat_id"], code, order["pkg_name"],
-                                    usdt_received, order["username"], "BLOCKCHAIN OTOMATIK"
+                                    usdt_received, order["username"], pkg_days, "BLOCKCHAIN OTOMATIK"
                                 )
                                 del pending_orders[usdt_received]
 
@@ -218,21 +270,22 @@ def admin_approval_listener():
                                     pkg_key = parts[2]
                                     code = parts[3]
                                     
-                                    if code in pending_approvals:
-                                        order = pending_approvals[code]
-                                        pkg = PACKAGES.get(pkg_key, {})
-                                        usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
-                                        
-                                        deliver_license_to_customer(
-                                            target_chat_id, code, order["pkg_name"],
-                                            usdt_amount, order["username"], "MANUEL ADMIN ONAY"
-                                        )
-                                        
-                                        del pending_approvals[code]
-                                        pending_orders.pop(usdt_amount, None)
-                                        send_log_message(f"\u2705 <code>{code}</code> kodlu lisans basariyla onaylandi ve musterisine teslim edildi!")
-                                    else:
-                                        send_log_message(f"\u26a0\ufe0f <code>{code}</code> kodlu siparis zaten onaylandi veya bulunamadi.")
+                                    pkg = PACKAGES.get(pkg_key, {})
+                                    pkg_days = pkg.get("days", 30)
+                                    usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
+                                    
+                                    order = pending_approvals.get(code, {})
+                                    username = order.get("username", "Kullanici")
+                                    pkg_name = pkg.get("name", "Lisans Paketi")
+                                    
+                                    deliver_license_to_customer(
+                                        target_chat_id, code, pkg_name,
+                                        usdt_amount, username, pkg_days, "MANUEL ADMIN ONAY"
+                                    )
+                                    
+                                    pending_approvals.pop(code, None)
+                                    pending_orders.pop(usdt_amount, None)
+                                    send_log_message(f"\u2705 <code>{code}</code> kodlu lisans Firebase'e eklendi ve musterisine teslim edildi!")
                                         
                             elif cb_data.startswith("reject#"):
                                 parts = cb_data.split("#")
@@ -304,13 +357,15 @@ def process_updates():
                                     price_tl = pkg["price_tl"]
                                     usdt_amount = round(price_tl / USDT_RATE, 2)
                                     code = generate_license_code()
+                                    duration_days = pkg["days"]
                                     
                                     # Blockchain otomatik takip havuzuna ekle
                                     pending_orders[usdt_amount] = {
                                         "chat_id": chat_id,
                                         "code": code,
                                         "pkg_name": pkg["name"],
-                                        "username": username
+                                        "username": username,
+                                        "duration_days": duration_days
                                     }
                                     
                                     # Manuel onay havuzuna da ekle
@@ -319,7 +374,8 @@ def process_updates():
                                         "pkg_name": pkg["name"],
                                         "username": username,
                                         "usdt_amount": usdt_amount,
-                                        "pkg_key": pkg_key
+                                        "pkg_key": pkg_key,
+                                        "duration_days": duration_days
                                     }
                                     
                                     pay_msg = (
@@ -366,7 +422,7 @@ def process_updates():
                                     admin_kb = {
                                         "inline_keyboard": [
                                             [{"text": f"\u2705 ONAYLA VE KODU TESLIM ET ({code})", "callback_data": f"approve#{chat_id}#{pkg_key}#{code}"}],
-                                            [{"text": f"\u274c REDDET ({code})", "callback_data": f"reject#{chat_id}#{code}"}]
+                                            [{"text": f"\u274c REDDET#{chat_id}#{code}", "callback_data": f"reject#{chat_id}#{code}"}]
                                         ]
                                     }
                                     send_log_message(admin_msg, admin_kb)
