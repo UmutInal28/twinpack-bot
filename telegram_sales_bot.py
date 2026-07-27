@@ -44,7 +44,7 @@ try:
         db = firestore.client()
         print("Firebase Firestore baglantisi basariyla kuruldu.")
     else:
-        print("UYARI: service-account.json bulunamadi, varsayilan cert ile deneniyor...")
+        print("UYARI: service-account.json bulunamadi, ApplicationDefault deneniyor...")
         cred = credentials.ApplicationDefault()
         firebase_admin.initialize_app(cred, {'projectId': 'umut-c37fd'})
         db = firestore.client()
@@ -245,6 +245,35 @@ def blockchain_auto_checker():
 # ============================================================
 # LOG BOT ADMIN ONAY DINLEYICISI (Manuel Tek Tus Onay)
 # ============================================================
+def extract_pkg_and_code(cb_data):
+    """Hem eski butonlari (paid_pkg_1m_CODE) hem yeni butonlari (paid#pkg_1m#CODE) hatasiz ayirir"""
+    matched_pkg_key = None
+    for k in PACKAGES.keys():
+        if k in cb_data:
+            matched_pkg_key = k
+            break
+            
+    if not matched_pkg_key:
+        matched_pkg_key = "pkg_1m"
+        
+    # Kodu bul: pkg_key sonrasindaki kisim
+    raw_after_pkg = cb_data
+    if "#" + matched_pkg_key + "#" in cb_data:
+        raw_after_pkg = cb_data.split("#" + matched_pkg_key + "#")[-1]
+    elif "_" + matched_pkg_key + "_" in cb_data:
+        raw_after_pkg = cb_data.split("_" + matched_pkg_key + "_")[-1]
+    else:
+        # fallback split
+        parts = cb_data.replace("#", "_").split("_")
+        raw_after_pkg = parts[-1]
+        
+    # Eger 1m_K5AG-XWCF-OVF5 gibi bir kalinti kaldiysa temizle
+    for p_id in ["1w_", "1m_", "2m_", "3m_", "6m_", "1y_", "unlim_"]:
+        if raw_after_pkg.startswith(p_id):
+            raw_after_pkg = raw_after_pkg.replace(p_id, "")
+            
+    return matched_pkg_key, raw_after_pkg.strip()
+
 def admin_approval_listener():
     print("Admin Manuel Onay Dinleyicisi Aktif...")
     offset = 0
@@ -262,40 +291,42 @@ def admin_approval_listener():
                             cb = update["callback_query"]
                             cb_data = cb.get("data", "")
                             
-                            # MANUEL ONAY FORMATI: approve#CHATID#PKGKEY#CODE
-                            if cb_data.startswith("approve#"):
-                                parts = cb_data.split("#")
-                                if len(parts) == 4:
+                            if cb_data.startswith("approve#") or cb_data.startswith("approve_"):
+                                pkg_key, code = extract_pkg_and_code(cb_data)
+                                
+                                # Target chat_id extraction
+                                target_chat_id = "1066847598"
+                                parts = cb_data.replace("#", "_").split("_")
+                                if len(parts) >= 2 and parts[1].isdigit():
                                     target_chat_id = parts[1]
-                                    pkg_key = parts[2]
-                                    code = parts[3]
                                     
-                                    pkg = PACKAGES.get(pkg_key, {})
-                                    pkg_days = pkg.get("days", 30)
-                                    usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
-                                    
-                                    order = pending_approvals.get(code, {})
-                                    username = order.get("username", "Kullanici")
-                                    pkg_name = pkg.get("name", "Lisans Paketi")
-                                    
-                                    deliver_license_to_customer(
-                                        target_chat_id, code, pkg_name,
-                                        usdt_amount, username, pkg_days, "MANUEL ADMIN ONAY"
-                                    )
-                                    
-                                    pending_approvals.pop(code, None)
-                                    pending_orders.pop(usdt_amount, None)
-                                    send_log_message(f"\u2705 <code>{code}</code> kodlu lisans Firebase'e eklendi ve musterisine teslim edildi!")
+                                pkg = PACKAGES.get(pkg_key, {})
+                                pkg_days = pkg.get("days", 30)
+                                usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
+                                
+                                order = pending_approvals.get(code, {})
+                                username = order.get("username", "Kullanici")
+                                pkg_name = pkg.get("name", "Lisans Paketi")
+                                
+                                deliver_license_to_customer(
+                                    target_chat_id, code, pkg_name,
+                                    usdt_amount, username, pkg_days, "MANUEL ADMIN ONAY"
+                                )
+                                
+                                pending_approvals.pop(code, None)
+                                pending_orders.pop(usdt_amount, None)
+                                send_log_message(f"\u2705 <code>{code}</code> kodlu lisans Firebase'e eklendi ve musterisine teslim edildi!")
                                         
-                            elif cb_data.startswith("reject#"):
-                                parts = cb_data.split("#")
-                                if len(parts) == 3:
+                            elif cb_data.startswith("reject#") or cb_data.startswith("reject_"):
+                                pkg_key, code = extract_pkg_and_code(cb_data)
+                                target_chat_id = "1066847598"
+                                parts = cb_data.replace("#", "_").split("_")
+                                if len(parts) >= 2 and parts[1].isdigit():
                                     target_chat_id = parts[1]
-                                    code = parts[2]
                                     
-                                    send_sales_message(target_chat_id, "\u274c <b>Odemeniz dogrulanamadi.</b>\nLutfen dogru tutari gonderdiginizden emin olun veya destek hattimizla iletisime gecin.")
-                                    pending_approvals.pop(code, None)
-                                    send_log_message(f"\u274c <code>{code}</code> kodlu siparis reddedildi.")
+                                send_sales_message(target_chat_id, "\u274c <b>Odemeniz dogrulanamadi.</b>\nLutfen dogru tutari gonderdiginizden emin olun veya destek hattimizla iletisime gecin.")
+                                pending_approvals.pop(code, None)
+                                send_log_message(f"\u274c <code>{code}</code> kodlu siparis reddedildi.")
 
         except Exception as e:
             print(f"Admin listener error: {e}")
@@ -309,11 +340,9 @@ def process_updates():
     offset = 0
     print("Twin Pack 100% Otomatik Satis Botu Aktif...")
     
-    # Render Web Service Port Binding
     t_health = threading.Thread(target=start_health_server, daemon=True)
     t_health.start()
 
-    # Arka plan threadleri baslat
     t1 = threading.Thread(target=blockchain_auto_checker, daemon=True)
     t1.start()
     
@@ -350,8 +379,8 @@ def process_updates():
                             cb_data = cb.get("data", "")
                             username = cb.get("from", {}).get("username", "Kullanici")
                             
-                            if cb_data.startswith("buy#"):
-                                pkg_key = cb_data.replace("buy#", "")
+                            if cb_data.startswith("buy#") or cb_data.startswith("buy_"):
+                                pkg_key, _ = extract_pkg_and_code(cb_data)
                                 if pkg_key in PACKAGES:
                                     pkg = PACKAGES[pkg_key]
                                     price_tl = pkg["price_tl"]
@@ -359,7 +388,6 @@ def process_updates():
                                     code = generate_license_code()
                                     duration_days = pkg["days"]
                                     
-                                    # Blockchain otomatik takip havuzuna ekle
                                     pending_orders[usdt_amount] = {
                                         "chat_id": chat_id,
                                         "code": code,
@@ -368,7 +396,6 @@ def process_updates():
                                         "duration_days": duration_days
                                     }
                                     
-                                    # Manuel onay havuzuna da ekle
                                     pending_approvals[code] = {
                                         "chat_id": chat_id,
                                         "pkg_name": pkg["name"],
@@ -380,7 +407,7 @@ def process_updates():
                                     
                                     pay_msg = (
                                         f"<b>\U0001f6d2 SECILEN PAKET: {pkg['name']}</b>\n"
-                                        f"\U0001f4b0 <b>Gonderilecek Tam Tutar:</b> <code>{usdt_amount}</code> USDT\n\n"
+                                        f"\U0001f4b0 <b>Gonderilecek Tam Tutar:</b> <code>{usdt_amount}</code> USDT ({price_tl} TL)\n\n"
                                         "-------------------------------------------\n"
                                         "\U0001f310 <b>USDT (TRC20) ODEME ADRESINIZ:</b>\n"
                                         f"<code>{USDT_TRC20_ADDRESS}</code>\n"
@@ -399,33 +426,31 @@ def process_updates():
                                     }
                                     send_sales_message(chat_id, pay_msg, confirm_kb)
                                     
-                            elif cb_data.startswith("paid#"):
-                                parts = cb_data.split("#")
-                                if len(parts) == 3:
-                                    pkg_key = parts[1]
-                                    code = parts[2]
-                                    
-                                    send_sales_message(chat_id, f"\u2705 <b>Odeme bildiriminiz alindi!</b>\nLisans kodunuz (<code>{code}</code>) kontrol edildikten hemen sonra aktif olacaktir.\n\n\u23f3 <i>Blockchain otomatik kontrol de devam ediyor...</i>")
-                                    
-                                    pkg = PACKAGES.get(pkg_key, {})
-                                    usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
-                                    
-                                    admin_msg = (
-                                        f"\U0001f4b0 <b>YENI ODEME BILDIRIMI!</b>\n\n"
-                                        f"\U0001f464 <b>Musteri:</b> @{username} (ID: <code>{chat_id}</code>)\n"
-                                        f"\U0001f4e6 <b>Paket:</b> {pkg.get('name')}\n"
-                                        f"\U0001f4b5 <b>Beklenen Tutar:</b> {usdt_amount} USDT ({pkg.get('price_tl')} TL)\n"
-                                        f"\U0001f511 <b>Uretilen Kod:</b> <code>{code}</code>\n\n"
-                                        f"\u2b07\ufe0f Cuzdan bakiyenizi kontrol edip odeme geldiyse <b>ONAYLA</b> tusuna basin."
-                                    )
-                                    
-                                    admin_kb = {
-                                        "inline_keyboard": [
-                                            [{"text": f"\u2705 ONAYLA VE KODU TESLIM ET ({code})", "callback_data": f"approve#{chat_id}#{pkg_key}#{code}"}],
-                                            [{"text": f"\u274c REDDET#{chat_id}#{code}", "callback_data": f"reject#{chat_id}#{code}"}]
-                                        ]
-                                    }
-                                    send_log_message(admin_msg, admin_kb)
+                            elif cb_data.startswith("paid#") or cb_data.startswith("paid_"):
+                                pkg_key, code = extract_pkg_and_code(cb_data)
+                                pkg = PACKAGES.get(pkg_key, {})
+                                usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
+                                price_tl = pkg.get("price_tl", 0)
+                                pkg_name = pkg.get("name", "Lisans Paketi")
+                                
+                                send_sales_message(chat_id, f"\u2705 <b>Odeme bildiriminiz alindi!</b>\nLisans kodunuz (<code>{code}</code>) kontrol edildikten hemen sonra aktif olacaktir.\n\n\u23f3 <i>Blockchain otomatik kontrol de devam ediyor...</i>")
+                                
+                                admin_msg = (
+                                    f"\U0001f4b0 <b>YENI ODEME BILDIRIMI!</b>\n\n"
+                                    f"\U0001f464 <b>Musteri:</b> @{username} (ID: <code>{chat_id}</code>)\n"
+                                    f"\U0001f4e6 <b>Paket:</b> {pkg_name}\n"
+                                    f"\U0001f4b5 <b>Beklenen Tutar:</b> {usdt_amount} USDT ({price_tl} TL)\n"
+                                    f"\U0001f511 <b>Uretilen Kod:</b> <code>{code}</code>\n\n"
+                                    f"\u2b07\ufe0f Cuzdan bakiyenizi kontrol edip odeme geldiyse <b>ONAYLA</b> tusuna basin."
+                                )
+                                
+                                admin_kb = {
+                                    "inline_keyboard": [
+                                        [{"text": f"\u2705 ONAYLA VE KODU TESLIM ET ({code})", "callback_data": f"approve#{chat_id}#{pkg_key}#{code}"}],
+                                        [{"text": f"\u274c REDDET", "callback_data": f"reject#{chat_id}#{code}"}]
+                                    ]
+                                }
+                                send_log_message(admin_msg, admin_kb)
 
                             elif cb_data == "back_to_menu":
                                 send_sales_message(chat_id, "<b>Ana Menu:</b>", main_menu())
