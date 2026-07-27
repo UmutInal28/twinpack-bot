@@ -137,7 +137,7 @@ def deliver_license_to_customer(target_chat_id, code, pkg_name, usdt_amount, use
 # TRON BLOCKCHAIN OTOMATIK ODEME TESPIT MOTORU
 # ============================================================
 def blockchain_auto_checker():
-    print("\u26d3\ufe0f TRON Blockchain Otomatik Kripto Odeme Denetleyicisi Calisiyor...")
+    print("TRON Blockchain Otomatik Kripto Odeme Denetleyicisi Calisiyor...")
     while True:
         try:
             url = f"https://api.trongrid.io/v1/accounts/{USDT_TRC20_ADDRESS}/transactions/trc20?limit=10"
@@ -177,7 +177,7 @@ def blockchain_auto_checker():
 # LOG BOT ADMIN ONAY DINLEYICISI (Manuel Tek Tus Onay)
 # ============================================================
 def admin_approval_listener():
-    print("\U0001f6e1\ufe0f Admin Manuel Onay Dinleyicisi Aktif...")
+    print("Admin Manuel Onay Dinleyicisi Aktif...")
     offset = 0
     while True:
         try:
@@ -237,7 +237,7 @@ def admin_approval_listener():
 # ============================================================
 def process_updates():
     offset = 0
-    print("\U0001f916 Twin Pack %100 Otomatik Satis Botu Aktif...")
+    print("Twin Pack 100% Otomatik Satis Botu Aktif...")
     
     # Arka plan threadleri baslat
     t1 = threading.Thread(target=blockchain_auto_checker, daemon=True)
