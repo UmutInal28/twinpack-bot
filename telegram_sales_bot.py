@@ -28,6 +28,7 @@ ADMIN_CHAT_ID = "7049176004"
 USDT_TRC20_ADDRESS = "TENBpF97XR1KVdbso4sia9eVd1xwU11FZe"
 
 USDT_RATE = 40.0
+FLOOD_COOLDOWN_SEC = 10  # Musteri flood engelleyici (10 saniye bekleme kurali)
 
 # ------------------------------------------------------------
 # FIREBASE FIRESTORE BAGLANTISI
@@ -80,9 +81,7 @@ def check_and_lock_paid_notification(code):
         lock_ref = db.collection("notified_paid_codes").document(code)
         doc = lock_ref.get()
         if doc.exists:
-            # Zaten baska bir sunucu/process bildirim gonderdi!
             return False
-        # Kilit koy
         lock_ref.set({"notifiedAt": firestore.SERVER_TIMESTAMP})
         return True
     except Exception as e:
@@ -119,7 +118,9 @@ PACKAGES = {
 pending_orders = {}
 pending_approvals = {}
 processed_tx_hashes = set()
-processed_cb_ids = set()
+processed_sales_update_ids = set()
+processed_admin_update_ids = set()
+user_last_click = {}  # {chat_id: timestamp} (Anti-Flood Korumasi)
 
 # RENDER WEB SERVICE PORT BINDING
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -144,22 +145,25 @@ def generate_license_code():
     part3 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"{part1}-{part2}-{part3}"
 
-def answer_sales_callback(callback_query_id, text=None):
-    """Telegram kurali: Butona basildiginda Telegram'a aninda ONAY (ACK) gonderir ki Telegram mesaji 5 kere tekrar tekrar yollamasin!"""
+def answer_sales_callback(callback_query_id, text=None, show_alert=False):
     url = f"https://api.telegram.org/bot{SALES_BOT_TOKEN}/answerCallbackQuery"
     payload = {"callback_query_id": callback_query_id}
     if text:
         payload["text"] = text
+    if show_alert:
+        payload["show_alert"] = True
     try:
         session.post(url, json=payload, timeout=5)
     except Exception as e:
         print(f"answer_sales_callback error: {e}")
 
-def answer_log_callback(callback_query_id, text=None):
+def answer_log_callback(callback_query_id, text=None, show_alert=False):
     url = f"https://api.telegram.org/bot{LOG_BOT_TOKEN}/answerCallbackQuery"
     payload = {"callback_query_id": callback_query_id}
     if text:
         payload["text"] = text
+    if show_alert:
+        payload["show_alert"] = True
     try:
         session.post(url, json=payload, timeout=5)
     except Exception as e:
@@ -285,7 +289,6 @@ def blockchain_auto_checker():
 # LOG BOT ADMIN ONAY DINLEYICISI (Manuel Tek Tus Onay)
 # ============================================================
 def extract_pkg_and_code(cb_data):
-    """Hem eski butonlari (paid_pkg_1m_CODE) hem yeni butonlari (paid#pkg_1m#CODE) hatasiz ayirir"""
     matched_pkg_key = None
     for k in PACKAGES.keys():
         if k in cb_data:
@@ -321,15 +324,17 @@ def admin_approval_listener():
                 data = r.json()
                 if "result" in data:
                     for update in data["result"]:
-                        offset = update["update_id"] + 1
+                        up_id = update.get("update_id")
+                        offset = max(offset, up_id + 1)
+                        
+                        if up_id in processed_admin_update_ids:
+                            continue
+                        processed_admin_update_ids.add(up_id)
                         
                         if "callback_query" in update:
                             cb = update["callback_query"]
                             cb_id = cb.get("id")
                             if cb_id:
-                                if cb_id in processed_cb_ids:
-                                    continue
-                                processed_cb_ids.add(cb_id)
                                 answer_log_callback(cb_id, "Islem alindi...")
 
                             cb_data = cb.get("data", "")
@@ -399,7 +404,12 @@ def process_updates():
                 data = r.json()
                 if "result" in data:
                     for update in data["result"]:
-                        offset = update["update_id"] + 1
+                        up_id = update.get("update_id")
+                        offset = max(offset, up_id + 1)
+                        
+                        if up_id in processed_sales_update_ids:
+                            continue
+                        processed_sales_update_ids.add(up_id)
                         
                         if "message" in update:
                             msg = update["message"]
@@ -418,16 +428,23 @@ def process_updates():
                         elif "callback_query" in update:
                             cb = update["callback_query"]
                             cb_id = cb.get("id")
-                            if cb_id:
-                                if cb_id in processed_cb_ids:
-                                    continue
-                                processed_cb_ids.add(cb_id)
-                                answer_sales_callback(cb_id, "Isleminiz alindi...")
-
                             chat_id = str(cb["message"]["chat"]["id"])
                             cb_data = cb.get("data", "")
                             username = cb.get("from", {}).get("username", "Kullanici")
                             
+                            # 10 SANIYELIK MUSTERI FLOOD ENGELLEYICI (COOLDOWN KONTROLU)
+                            now = time.time()
+                            last_click = user_last_click.get(chat_id, 0)
+                            if (now - last_click) < FLOOD_COOLDOWN_SEC:
+                                remaining_sec = int(FLOOD_COOLDOWN_SEC - (now - last_click))
+                                if cb_id:
+                                    answer_sales_callback(cb_id, f"\u26a0\ufe0f Lutfen yeni secim yapabilmek icin {remaining_sec} saniye bekleyin!", show_alert=True)
+                                continue
+                            
+                            user_last_click[chat_id] = now
+                            if cb_id:
+                                answer_sales_callback(cb_id, "Isleminiz alindi...")
+
                             if cb_data.startswith("buy#") or cb_data.startswith("buy_"):
                                 pkg_key, _ = extract_pkg_and_code(cb_data)
                                 if pkg_key in PACKAGES:
@@ -478,7 +495,7 @@ def process_updates():
                             elif cb_data.startswith("paid#") or cb_data.startswith("paid_"):
                                 pkg_key, code = extract_pkg_and_code(cb_data)
                                 
-                                # FIREBASE ORTAK VERITABANI ATOMIK KILIT (Render + Local PC ayni anda calissa bile TEK BILDİRIM)
+                                # FIREBASE ORTAK VERITABANI ATOMIK KILIT
                                 if not check_and_lock_paid_notification(code):
                                     continue
                                 
