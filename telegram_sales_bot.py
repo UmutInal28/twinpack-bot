@@ -31,24 +31,35 @@ USDT_RATE = 40.0
 FLOOD_COOLDOWN_SEC = 10  # Musteri flood engelleyici (10 saniye bekleme kurali)
 
 # ------------------------------------------------------------
-# FIREBASE FIRESTORE BAGLANTISI
+# FIREBASE FIRESTORE BAGLANTISI (Hem Dosyayi hem Env Var Destekler)
 # ------------------------------------------------------------
 db = None
 try:
-    sa_path = os.path.join(os.path.dirname(__file__), "license-tools", "service-account.json")
-    if not os.path.exists(sa_path):
-        sa_path = os.path.join(os.path.dirname(__file__), "service-account.json")
-    
-    if os.path.exists(sa_path):
-        cred = credentials.Certificate(sa_path)
-        firebase_admin.initialize_app(cred)
-        db = firestore.client()
-        print("Firebase Firestore baglantisi basariyla kuruldu.")
-    else:
-        print("UYARI: service-account.json bulunamadi, ApplicationDefault deneniyor...")
-        cred = credentials.ApplicationDefault()
-        firebase_admin.initialize_app(cred, {'projectId': 'umut-c37fd'})
-        db = firestore.client()
+    # 1. RENDER.COM GUVENLI ORTAM DEGISKENI (GitHub'a dosya yuklemeden calisma)
+    env_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+    if env_json:
+        try:
+            sa_dict = json.loads(env_json)
+            cred = credentials.Certificate(sa_dict)
+            firebase_admin.initialize_app(cred)
+            db = firestore.client()
+            print("Firebase Firestore baglantisi Environment Variable ile kuruldu.")
+        except Exception as ex_env:
+            print(f"Env json parse hatasi: {ex_env}")
+
+    # 2. LOKAL YEREL DOSYA (service-account.json)
+    if db is None:
+        sa_path = os.path.join(os.path.dirname(__file__), "license-tools", "service-account.json")
+        if not os.path.exists(sa_path):
+            sa_path = os.path.join(os.path.dirname(__file__), "service-account.json")
+        
+        if os.path.exists(sa_path):
+            cred = credentials.Certificate(sa_path)
+            firebase_admin.initialize_app(cred)
+            db = firestore.client()
+            print("Firebase Firestore baglantisi service-account.json dosyasi ile kuruldu.")
+        else:
+            print("UYARI: service-account.json veya FIREBASE_SERVICE_ACCOUNT bulunamadi!")
 except Exception as e:
     print(f"Firebase baglanti hatasi: {e}")
 
@@ -121,6 +132,14 @@ processed_tx_hashes = set()
 processed_sales_update_ids = set()
 processed_admin_update_ids = set()
 user_last_click = {}  # {chat_id: timestamp} (Anti-Flood Korumasi)
+
+def get_unique_usdt_amount(base_price_tl):
+    """Ayni anda ayni paketi alan 2 kisi karismasin diye minik sent farki olusturur (25.00 USDT, 25.01 USDT vb.)"""
+    base_usdt = round(base_price_tl / USDT_RATE, 2)
+    offset_cents = 0.00
+    while round(base_usdt + offset_cents, 2) in pending_orders:
+        offset_cents += 0.01
+    return round(base_usdt + offset_cents, 2)
 
 # RENDER WEB SERVICE PORT BINDING
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -450,7 +469,7 @@ def process_updates():
                                 if pkg_key in PACKAGES:
                                     pkg = PACKAGES[pkg_key]
                                     price_tl = pkg["price_tl"]
-                                    usdt_amount = round(price_tl / USDT_RATE, 2)
+                                    usdt_amount = get_unique_usdt_amount(price_tl)
                                     code = generate_license_code()
                                     duration_days = pkg["days"]
                                     
@@ -499,10 +518,13 @@ def process_updates():
                                 if not check_and_lock_paid_notification(code):
                                     continue
                                 
-                                pkg = PACKAGES.get(pkg_key, {})
-                                usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
-                                price_tl = pkg.get("price_tl", 0)
-                                pkg_name = pkg.get("name", "Lisans Paketi")
+                                order = pending_approvals.get(code, {})
+                                usdt_amount = order.get("usdt_amount")
+                                if not usdt_amount:
+                                    pkg = PACKAGES.get(pkg_key, {})
+                                    usdt_amount = round(pkg.get("price_tl", 0) / USDT_RATE, 2)
+                                price_tl = PACKAGES.get(pkg_key, {}).get("price_tl", 0)
+                                pkg_name = PACKAGES.get(pkg_key, {}).get("name", "Lisans Paketi")
                                 
                                 send_sales_message(chat_id, f"\u2705 <b>Odeme bildiriminiz alindi!</b>\nLisans kodunuz (<code>{code}</code>) kontrol edildikten hemen sonra aktif olacaktir.\n\n\u23f3 <i>Blockchain otomatik kontrol de devam ediyor...</i>")
                                 
