@@ -84,20 +84,25 @@ def save_license_to_firebase(code, duration_days):
         print(f"Firestore lisans kayit hatasi ({code}): {e}")
         return False
 
+notified_codes_memory = set()
+
 def check_and_lock_paid_notification(code):
-    """Render ve Local PC ayni anda calissa bile Firebase ortak veritabani uzerinden %100 TEKIL BILDIRIM garantisi verir"""
-    if db is None:
-        return True
-    try:
-        lock_ref = db.collection("notified_paid_codes").document(code)
-        doc = lock_ref.get()
-        if doc.exists:
-            return False
-        lock_ref.set({"notifiedAt": firestore.SERVER_TIMESTAMP})
-        return True
-    except Exception as e:
-        print(f"Lock check error: {e}")
-        return True
+    """Hem RAM hem Firestore uzerinden %100 TEKIL BILDIRIM KILIDI koyar (Ust uste buton basimini kesin engeller)"""
+    if code in notified_codes_memory:
+        return False
+    notified_codes_memory.add(code)
+    
+    if db is not None:
+        try:
+            lock_ref = db.collection("notified_paid_codes").document(code)
+            doc = lock_ref.get()
+            if doc.exists:
+                return False
+            lock_ref.set({"notifiedAt": firestore.SERVER_TIMESTAMP})
+        except Exception as e:
+            print(f"Lock check error: {e}")
+            
+    return True
 
 # ------------------------------------------------------------
 # HTTP PROXY & PAKETLER
@@ -520,7 +525,7 @@ def process_updates():
                             elif cb_data.startswith("paid#") or cb_data.startswith("paid_"):
                                 pkg_key, code = extract_pkg_and_code(cb_data)
                                 
-                                # FIREBASE ORTAK VERITABANI ATOMIK KILIT
+                                # RAM + FIREBASE KİLİDİ (ÇİFT BİLDİRİMİ KESİN ENGELLER)
                                 if not check_and_lock_paid_notification(code):
                                     continue
                                 
