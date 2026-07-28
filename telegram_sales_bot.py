@@ -15,11 +15,11 @@ from firebase_admin import credentials, firestore
 # TWIN PACK TELEGRAM 2-BOT MIMARISI + FIREBASE FIRESTORE ENTEGRASYONU
 # ============================================================
 
-# 1. SATIS BOTU (Public Musteri Magazasi)
-SALES_BOT_TOKEN = "8608754130:AAHG2twApEYgiLWP3tBrqG6NQz27dHZDZEw"
+# 1. SATIS BOTU (Public Musteri Magazasi) - YENI TOKEN
+SALES_BOT_TOKEN = "8608754130:AAEOjVuLKNWusYjGoWTbSNBF3olQ-GiDb2c"
 
-# 2. LOG & BILDIRIM BOTU (Private Admin Log Bot)
-LOG_BOT_TOKEN = "8821625181:AAFYLo2uDzV46ZHR0vdcVeNOBPF0q0QLkKw"
+# 2. LOG & BILDIRIM BOTU (Private Admin Log Bot) - YENI TOKEN
+LOG_BOT_TOKEN = "8821625181:AAEVrM7HQpsZCUgupAh1_PVrug4i0Dm3_u4"
 
 # Sizin Sahsi Telegram Chat ID'niz
 ADMIN_CHAT_ID = "7049176004"
@@ -267,7 +267,8 @@ def deliver_license_to_customer(target_chat_id, code, pkg_name, usdt_amount, use
         f"\U0001f511 <b>Teslim Edilen Kod:</b> <code>{code}</code>\n"
         f"\U0001f552 <b>Zaman:</b> {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
-    send_log_message(log_msg)
+    send_log_msg_resp = send_log_message(log_msg)
+    print(f"Log msg result: {send_log_msg_resp}")
 
 # ============================================================
 # TRON BLOCKCHAIN OTOMATIK ODEME TESPIT MOTORU
@@ -554,7 +555,8 @@ def process_updates():
                                         [{"text": f"\u274c REDDET", "callback_data": f"reject#{chat_id}#{code}"}]
                                     ]
                                 }
-                                send_log_message(admin_msg, admin_kb)
+                                send_log_resp = send_log_message(admin_msg, admin_kb)
+                                print(f"Admin log send response: {send_log_resp}")
 
                             elif cb_data == "back_to_menu":
                                 send_sales_message(chat_id, "<b>Ana Menu:</b>", main_menu())
