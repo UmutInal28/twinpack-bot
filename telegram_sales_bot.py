@@ -440,9 +440,12 @@ def process_updates():
                                 welcome_msg = (
                                     f"<b>\U0001f44b Merhaba @{username}! Twin Pack Kripto Otomatik Lisans Magazasina Hos Geldiniz.</b>\n\n"
                                     "Ihtiyaciniza uygun lisans paketini asagidan secerek <b>USDT (TRC20) Kripto ile odemenizi gonderin.</b>\n\n"
-                                    "\U0001f916 <i>Blockchain sistemi odemeyi otomatik algilar ve lisans kodunuzu saniyeler icinde teslim eder!</i>"
+                                    "\U0001f916 <i>Blockchain sistemi odemeyi otomatik algilar ve lisans kodunuzu saniyeler icinde teslim eder!</i>\n\n"
+                                    "\u2b07\ufe0f <b>KOPYALANABILIR USDT (TRC20) CUZDAN ADRESINIZ:</b>"
                                 )
                                 send_sales_message(chat_id, welcome_msg, main_menu())
+                                # Kopyalanabilir tekil cuzdan adresi mesaji
+                                send_sales_message(chat_id, f"<code>{USDT_TRC20_ADDRESS}</code>")
 
                         elif "callback_query" in update:
                             cb = update["callback_query"]
@@ -490,16 +493,19 @@ def process_updates():
                                         "duration_days": duration_days
                                     }
                                     
-                                    pay_msg = (
+                                    pay_msg1 = (
                                         f"<b>\U0001f6d2 SECILEN PAKET: {pkg['name']}</b>\n"
                                         f"\U0001f4b0 <b>Gonderilecek Tam Tutar:</b> <code>{usdt_amount}</code> USDT ({price_tl} TL)\n\n"
-                                        "-------------------------------------------\n"
-                                        "\U0001f310 <b>USDT (TRC20) ODEME ADRESINIZ:</b>\n"
-                                        f"<code>{USDT_TRC20_ADDRESS}</code>\n"
-                                        "(Kopyalamak icin adresin uzerine dokunun)\n\n"
-                                        "\u26a1 <b>%100 Otomatik Sistem:</b> Parayi gonderdiginiz an Blokzincir sistemi 15 saniyede algilar ve kodunuzu otomatik teslim eder!\n"
-                                        "-------------------------------------------\n"
-                                        f"\U0001f511 <b>Rezerve Edilen Kodunuz:</b> <code>{code}</code>"
+                                        "\U0001f310 <b>USDT (TRC20) ODEME ADRESINIZ (Dokunarak Kopyalayin):</b>"
+                                    )
+                                    send_sales_message(chat_id, pay_msg1)
+                                    
+                                    # TEK TIKLA %100 PANOTA KOPYALANABILIR CUZDAN ADRESI MESAJI
+                                    send_sales_message(chat_id, f"<code>{USDT_TRC20_ADDRESS}</code>")
+                                    
+                                    pay_msg2 = (
+                                        f"\U0001f511 <b>Rezerve Edilen Kodunuz:</b> <code>{code}</code>\n\n"
+                                        "\u26a1 <b>%100 Otomatik Sistem:</b> Parayi gonderdiginiz an Blokzincir sistemi 15 saniyede algilar ve kodunuzu otomatik teslim eder!"
                                     )
                                     
                                     confirm_kb = {
@@ -509,7 +515,7 @@ def process_updates():
                                             [{"text": "\U0001f519 Ana Menuye Don", "callback_data": "back_to_menu"}]
                                         ]
                                     }
-                                    send_sales_message(chat_id, pay_msg, confirm_kb)
+                                    send_sales_message(chat_id, pay_msg2, confirm_kb)
                                     
                             elif cb_data.startswith("paid#") or cb_data.startswith("paid_"):
                                 pkg_key, code = extract_pkg_and_code(cb_data)
