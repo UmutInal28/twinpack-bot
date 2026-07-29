@@ -147,19 +147,29 @@ def get_unique_usdt_amount(base_price_tl):
     return round(base_usdt + offset_cents, 2)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    def handle_http(self):
+        try:
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(b"OK - Twin Pack Sales Bot is Running")
+        except Exception:
+            pass
+
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"OK - Twin Pack Sales Bot is Running")
+        self.handle_http()
 
     def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
+        self.handle_http()
+
+    def do_POST(self):
+        self.handle_http()
+
+    def do_OPTIONS(self):
+        self.handle_http()
 
     def log_message(self, format, *args):
-        # Quiet log output
         return
 
 def start_health_server():
