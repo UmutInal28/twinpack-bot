@@ -146,13 +146,21 @@ def get_unique_usdt_amount(base_price_tl):
         offset_cents += 0.01
     return round(base_usdt + offset_cents, 2)
 
-# RENDER WEB SERVICE PORT BINDING
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
         self.wfile.write(b"OK - Twin Pack Sales Bot is Running")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        # Quiet log output
+        return
 
 def start_health_server():
     try:
